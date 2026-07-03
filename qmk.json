@@ -2,6 +2,7 @@
     "userspace_version": "1.1",
     "build_targets": [
         ["adafruit/macropad", "drashna"],
+        ["handwired/tractyl_manuform/3x6_right", "pyromano"],
         ["handwired/tractyl_manuform/5x6_right/f411", "drashna"],
         ["handwired/tractyl_manuform/5x6_right/f405", "drashna"],
         ["moonlander", "drashna"],
