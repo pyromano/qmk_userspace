@@ -8,6 +8,7 @@ bool menu_handler_debugging_enable(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_enable = !debug_enable;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -24,6 +25,7 @@ bool menu_handler_keyboard_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_keyboard = !debug_keyboard;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -40,6 +42,7 @@ bool menu_handler_matrix_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_matrix = !debug_matrix;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -56,6 +59,7 @@ bool menu_handler_mouse_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_mouse = !debug_mouse;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -73,6 +77,7 @@ bool menu_handler_pointing_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_pointing = !debug_pointing;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -89,6 +94,7 @@ bool menu_handler_action_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_action = !debug_action;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -105,6 +111,7 @@ bool menu_handler_split_serial_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_serial = !debug_serial;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -121,6 +128,7 @@ bool menu_handler_quantum_painter_debugging(menu_input_t input) {
         case menu_input_right:
         case menu_input_enter:
             debug_quantum_painter = !debug_quantum_painter;
+            eeconfig_update_debug(&debug_config);
             return false;
         default:
             return true;
@@ -132,28 +140,6 @@ __attribute__((weak)) void display_handler_quantum_painter_debugging(char *text_
 }
 #endif
 
-#ifdef COMMUNITY_MODULE_I2C_SCANNER_ENABLE
-#    include "i2c_scanner.h"
-
-bool menu_handler_i2c_scanner(menu_input_t input) {
-    switch (input) {
-        case menu_input_left:
-        case menu_input_right:
-        case menu_input_enter:
-            userspace_config.debug.i2c_scanner_enable = !userspace_config.debug.i2c_scanner_enable;
-            i2c_scanner_set_enabled(userspace_config.debug.i2c_scanner_enable);
-            eeconfig_update_user_datablock(&userspace_config, 0, EECONFIG_USER_DATA_SIZE);
-
-            return false;
-        default:
-            return true;
-    }
-}
-
-__attribute__((weak)) void display_handler_i2c_scanner(char *text_buffer, size_t buffer_len) {
-    snprintf(text_buffer, buffer_len - 1, "%s", userspace_config.debug.i2c_scanner_enable ? "on" : "off");
-}
-#endif
 
 bool menu_handler_scan_rate(menu_input_t input) {
     switch (input) {
@@ -172,26 +158,6 @@ __attribute__((weak)) void display_handler_scan_rate(char *text_buffer, size_t b
     snprintf(text_buffer, buffer_len - 1, "%s", userspace_config.debug.matrix_scan_print ? "on" : "off");
 }
 
-#ifdef COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
-#    include "console_keylogging.h"
-bool menu_handler_keylogger(menu_input_t input) {
-    switch (input) {
-        case menu_input_left:
-        case menu_input_right:
-            userspace_config.debug.console_keylogger = !userspace_config.debug.console_keylogger;
-            eeconfig_update_user_datablock(&userspace_config, 0, EECONFIG_USER_DATA_SIZE);
-            console_keylogger_set_enabled(userspace_config.debug.console_keylogger);
-            return false;
-        default:
-            return true;
-    }
-}
-
-__attribute__((weak)) void display_handler_keylogger(char *text_buffer, size_t buffer_len) {
-    snprintf(text_buffer, buffer_len - 1, "%s", console_keylogger_get_enabled() ? "on" : "off");
-}
-#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
-
 menu_entry_t debug_entries[] = {
     MENU_ENTRY_CHILD("Debugging", "Enabled", debugging_enable), // force formatting
     MENU_ENTRY_CHILD("Keyboard Debugging", "Keeb", keyboard_debugging),
@@ -202,12 +168,5 @@ menu_entry_t debug_entries[] = {
     MENU_ENTRY_CHILD("Action Debugging", "Action", action_debugging),
     MENU_ENTRY_CHILD("Split Serial Debugging", "Split", split_serial_debugging),
     MENU_ENTRY_CHILD("Quantum Painter Debugging", "QP????", quantum_painter_debugging),
-#endif
-#ifdef COMMUNITY_MODULE_I2C_SCANNER_ENABLE
-    MENU_ENTRY_CHILD("I2C Scanner", "I2C Scan", i2c_scanner),
-#endif // COMMUNITY_MODULE_I2C_SCANNER_ENABLE
     MENU_ENTRY_CHILD("Matrix Scan Rate Print", "Scan Rate", scan_rate),
-#ifdef COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
-    MENU_ENTRY_CHILD("Console Keylogger", "Keylogger", keylogger),
-#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
 };

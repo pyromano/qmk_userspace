@@ -83,7 +83,7 @@ static painter_device_t wpm_graph_surface;
 #    endif // WPM_ENABLE && !WPM_NO_SURFACE
 #endif     // QUANTUM_PAINTER_DRIVERS_ILI9341_SURFACE
 
-static bool has_run = false, forced_reinit = false;
+static bool has_run = false, forced_reinit = true;
 
 void init_display_ili9341_inversion(void) {
     qp_comms_start(display);
@@ -127,7 +127,7 @@ void init_display_ili9341_rotation(void) {
  * @brief Initializes the display, clears it and sets frame and title
  *
  */
-void init_display_ili9341(void) {
+uint32_t init_display_ili9341_exec(uint32_t trigger_time, void *cb_arg) {
     display = qp_ili9341_make_spi_device(240, 320, ILI9341_CS_PIN, ILI9341_DC_PIN, ILI9341_RST_PIN, ILI9341_SPI_DIVIDER,
                                          ILI9341_SPI_MODE);
 #ifdef QUANTUM_PAINTER_DRIVERS_ILI9341_SURFACE
@@ -147,6 +147,12 @@ void init_display_ili9341(void) {
 #endif     // QUANTUM_PAINTER_DRIVERS_ILI9341_SURFACE
 
     init_display_ili9341_rotation();
+
+    return 0;
+}
+
+void init_display_ili9341(void) {
+    defer_exec(500, init_display_ili9341_exec, NULL);
 }
 
 void ili9341_display_power(bool on) {
@@ -195,6 +201,11 @@ __attribute__((weak)) void ili9341_draw_user(void) {
     const uint8_t disabled_val = curr_hsv.primary.v / 2;
     uint16_t      width;
     uint16_t      height;
+
+    if (display == NULL) {
+        return;
+    }
+
     qp_get_geometry(display, &width, &height, NULL, NULL, NULL);
 
     if (screen_saver_sanity_checks()) {
@@ -492,7 +503,25 @@ __attribute__((weak)) void ili9341_draw_user(void) {
                                             last_jiggle_enabled ? curr_hsv.primary.v : disabled_val, 0, 0, 0);
             }
 #    endif // COMMUNITY_MODULE_MOUSE_JIGGLER_ENABLE
-#endif     // POINTING_DEVICE_ENABLE
+
+#    ifdef COMMUNITY_MODULE_POINTING_DEVICE_SMOOTHING_ENABLE
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            // Pointing Device Sniping mode
+            bool pointing_device_smoothing_get_enabled(void);
+
+            static bool last_smoothing_state = false;
+
+            if (hue_redraw || last_smoothing_state != pointing_device_smoothing_get_enabled()) {
+                last_smoothing_state = pointing_device_smoothing_get_enabled();
+                xpos                 = 5;
+                xpos += qp_drawtext_recolor(display, xpos, ypos, font_oled, "Smoothing",
+                                            last_smoothing_state ? curr_hsv.secondary.h : curr_hsv.primary.h,
+                                            last_smoothing_state ? curr_hsv.secondary.s : curr_hsv.primary.s,
+                                            last_smoothing_state ? curr_hsv.primary.v : disabled_val, 0, 0, 0);
+            }
+            ypos += font_oled->line_height + 4;
+#    endif
+#endif // POINTING_DEVICE_ENABLE
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Mods
@@ -707,7 +736,7 @@ __attribute__((weak)) void ili9341_draw_user(void) {
         qp_surface_draw(menu_surface, display, 2, 172, screen_saver_redraw);
 #else  // QUANTUM_PAINTER_DRIVERS_ILI9341_SURFACE
         painter_render_menu_block(display, font_oled, 2, 172, 237, 291, screen_saver_redraw || hue_redraw, &curr_hsv,
-                                  is_keyboard_master(), true);
+                                  is_keyboard_left(), true);
 #endif // QUANTUM_PAINTER_DRIVERS_ILI9341_SURFACE
 
         // Footer
@@ -751,6 +780,10 @@ __attribute__((weak)) void ili9341_draw_user(void) {
 }
 
 void ili9341_display_shutdown(bool jump_to_bootloader) {
+    if (display == NULL) {
+        init_display_ili9341_exec(0, NULL);
+    }
+
     ili9341_display_power(true);
     painter_render_shutdown(display, jump_to_bootloader);
 }

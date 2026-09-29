@@ -15,12 +15,6 @@
 #if defined(OLED_ENABLE) && defined(CUSTOM_OLED_DRIVER)
 #    include "display/oled/oled_stuff.h"
 #endif
-#ifdef CUSTOM_DYNAMIC_MACROS_ENABLE
-#    include "keyrecords/custom_dynamic_macros.h"
-#endif // CUSTOM_DYNAMIC_MACROS_ENABLE
-#ifndef RTC_TIMEZONE
-#    define RTC_TIMEZONE -8
-#endif // RTC_TIMEZONE
 #ifdef CUSTOM_UNICODE_ENABLE
 void keyboard_post_init_unicode(void);
 #endif // CUSTOM_UNICODE_ENABLE
@@ -35,18 +29,19 @@ void keyboard_post_init_unicode(void);
 #if defined(CUSTOM_RGB_MATRIX)
 #    include "rgb/rgb_matrix_stuff.h"
 #endif // CUSTOM_RGB_MATRIX
+#ifdef WPM_ENABLE
+#    include "wpm.h"
+#    ifdef COMMUNITY_MODULE_WPM_STATS_ENABLE
+#        include "wpm_stats.h"
+#    endif
+uint8_t wpm_graph_samples[3][WPM_GRAPH_SAMPLES] = {0};
+#endif // WPM_ENABLE
 #ifdef COMMUNITY_MODULE_RTC_ENABLE
 #    include "rtc.h"
 #endif // COMMUNITY_MODULE_RTC_ENABLE
 #ifdef CUSTOM_TAP_DANCE_ENABLE
 #    include "keyrecords/custom_tap_dance.h"
 #endif // CUSTOM_TAP_DANCE_ENABLE
-#ifdef COMMUNITY_MODULE_I2C_SCANNER_ENABLE
-#    include "i2c_scanner.h"
-#endif // COMMUNITY_MODULE_I2C_SCANNER_ENABLE
-#ifdef COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
-#    include "console_keylogging.h"
-#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
 
 userspace_runtime_state_t userspace_runtime_state;
 
@@ -88,12 +83,6 @@ void                       keyboard_post_init_user(void) {
 #ifdef CUSTOM_UNICODE_ENABLE
     keyboard_post_init_unicode();
 #endif // CUSTOM_UNICODE_ENABLE
-#ifdef COMMUNITY_MODULE_I2C_SCANNER_ENABLE
-    i2c_scanner_set_enabled(userspace_config.debug.i2c_scanner_enable);
-#endif // COMMUNITY_MODULE_I2C_SCANNER_ENABLE
-#ifdef COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
-    console_keylogger_set_enabled(userspace_config.debug.console_keylogger);
-#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
 #ifdef DEBUG_MATRIX_SCAN_RATE_ENABLE
     userspace_config.debug.matrix_scan_print = true;
 #endif // DEBUG_MATRIX_SCAN_RATE_ENABLE
@@ -105,13 +94,6 @@ void                       keyboard_post_init_user(void) {
     DDRB &= ~(1 << 0);
     PORTB &= ~(1 << 0);
 #endif // BOOTLOADER_CATERINA && __AVR__ && __AVR_ATmega32U4__
-#ifdef CUSTOM_DYNAMIC_MACROS_ENABLE
-    dynamic_macro_init();
-#endif // CUSTOM_DYNAMIC_MACROS_ENABLE
-#ifdef WPM_ENABLE
-    void keyboard_post_init_wpm(void);
-    keyboard_post_init_wpm();
-#endif // WPM_ENABLE
     keyboard_post_init_keymap();
 }
 
@@ -297,8 +279,6 @@ void                       eeconfig_init_user(void) {
     userspace_config.pointing.auto_mouse_layer.debounce = AUTO_MOUSE_DEBOUNCE;
     userspace_config.pointing.mouse_jiggler.enable      = false;
     userspace_config.pointing.mouse_jiggler.timeout     = 30;
-
-    userspace_config.rtc.timezone = RTC_TIMEZONE;
     // ensure that nkro is enabled
     eeconfig_read_keymap(&keymap_config);
     keymap_config.nkro = true;
@@ -306,10 +286,6 @@ void                       eeconfig_init_user(void) {
 
     eeconfig_init_keymap();
     eeconfig_update_user_datablock(&userspace_config, 0, EECONFIG_USER_DATA_SIZE);
-#if defined(POINTING_DEVICE_ENABLE) && defined(COMMUNITY_MODULE_POINTING_DEVICE_ACCEL_ENABLE)
-    void eeconfig_init_pointing_device(void);
-    eeconfig_init_pointing_device();
-#endif // COMMUNITY_MODULE_POINTING_DEVICE_ACCEL_ENABLE
 }
 
 /**
@@ -397,34 +373,37 @@ void                       housekeeping_task_user(void) {
     housekeeping_task_transport_sync();
 #endif // SPLIT_KEYBOARD && SPLIT_TRANSACTION_IDS_USER
 #ifdef WPM_ENABLE
-    void housekeeping_task_wpm(void);
-    housekeeping_task_wpm();
+    if (is_keyboard_master()) {
+        static uint16_t interval = 0;
+
+        if (timer_elapsed(interval) >= 1000) {
+            // Shift the wpm_graph_samples array to the right
+            for (uint8_t i = WPM_GRAPH_SAMPLES - 1; i > 0; i--) {
+                for (uint8_t j = 0; j < 3; j++) {
+                    wpm_graph_samples[j][i] = wpm_graph_samples[j][i - 1];
+                }
+            }
+
+            // Update the first element of the array with the new average WPM
+#    ifdef COMMUNITY_MODULE_WPM_STATS_ENABLE
+            wpm_graph_samples[0][0] = wpm_stats_get_current();
+            wpm_graph_samples[1][0] = wpm_stats_get_avg();
+            wpm_graph_samples[2][0] = wpm_stats_get_max();
+#    else
+            wpm_graph_samples[0][0] = get_current_wpm();
+#    endif // COMMUNITY_MODULE_WPM_STATS_ENABLE
+            interval = timer_read();
+        }
+    }
 #endif // WPM_ENABLE
     housekeeping_task_keymap();
 }
 
 #ifdef COMMUNITY_MODULE_RTC_ENABLE
-bool rtc_needs_sync = false;
-
-void rtc_check_dst_format(rtc_time_t *time) {
-#    ifdef VENDOR_RTC_DRIVER_ENABLE
-    time->format = userspace_config.rtc.format_24h;
-#    endif // VENDOR_RTC_DRIVER_ENABLE
-    time->timezone = userspace_config.rtc.timezone;
-    time->is_dst   = userspace_config.rtc.is_dst;
-}
-
 bool rtc_set_time_user(rtc_time_t *time) {
 #    ifdef COMMUNITY_MODULE_DISPLAY_MENU_ENABLE
     display_menu_set_dirty(true);
 #    endif // COMMUNITY_MODULE_DISPLAY_MENU_ENABLE
-    userspace_config.rtc.is_dst     = time->is_dst;
-    userspace_config.rtc.timezone   = time->timezone;
-    userspace_config.rtc.format_24h = time->format;
-    eeconfig_update_user_datablock(&userspace_config, 0, EECONFIG_USER_DATA_SIZE);
-    if (is_keyboard_master()) {
-        rtc_needs_sync = rtc_is_connected();
-    }
     return true;
 }
 #endif

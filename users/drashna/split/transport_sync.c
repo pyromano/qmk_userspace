@@ -13,9 +13,12 @@
 #if defined(COMMUNITY_MODULE_DISPLAY_MENU_ENABLE)
 #    include "display_menu.h"
 #endif // COMMUNITY_MODULE_DISPLAY_MENU_ENABLE
-#ifdef COMMUNITY_MODULE_RTC_ENABLE
-#    include "rtc.h"
-#endif // COMMUNITY_MODULE_RTC_ENABLE
+#if defined(COMMUNITY_MODULE_I2C_SCANNER_ENABLE)
+#    include "i2c_scanner.h"
+#endif // COMMUNITY_MODULE_I2C_SCANNER_ENABLE
+#if defined(COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE)
+#    include "console_keylogging.h"
+#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
 #ifdef UNICODE_COMMON_ENABLE
 #    include "process_unicode_common.h"
 extern unicode_config_t unicode_config;
@@ -30,7 +33,7 @@ extern bool           delayed_tasks_run;
 extern bool swap_hands;
 #endif
 #ifdef WPM_ENABLE
-extern uint8_t wpm_graph_samples[WPM_GRAPH_SAMPLES];
+extern uint8_t wpm_graph_samples[3][WPM_GRAPH_SAMPLES];
 #endif // WPM_ENABLE
 #ifdef DISPLAY_DRIVER_ENABLE
 #    include "display/display.h"
@@ -41,9 +44,6 @@ extern uint8_t wpm_graph_samples[WPM_GRAPH_SAMPLES];
 #        include "display/oled/oled_stuff.h"
 #    endif // OLED_ENABLE
 #endif     // DISPLAY_DRIVER_ENABLE
-#if defined(WPM_ENABLE) && defined(COMMUNITY_MODULE_WPM_STATS_ENABLE)
-#    include "wpm_stats.h"
-#endif // WPM_ENABLE && COMMUNITY_MODULE_WPM_STATS_ENABLE
 #ifndef FORCED_SYNC_THROTTLE_MS
 #    define FORCED_SYNC_THROTTLE_MS 100
 #endif // FORCED_SYNC_THROTTLE_MS
@@ -60,8 +60,8 @@ typedef enum PACKED extended_id_t {
     RPC_ID_EXTENDED_USERSPACE_RUNTIME_STATE,
     RPC_ID_EXTENDED_SUSPEND_STATE,
     RPC_ID_EXTENDED_OLED_KEYLOGGER_STR,
-    RPC_ID_EXTENDED_RTC_CONFIG,
-    RPC_ID_EXTENDED_WPM_STAT_CONFIG,
+    RPC_ID_EXTENDED_I2C_SCANNER,
+    RPC_ID_EXTENDED_CONSOLE_KEYLOGGER,
     NUM_EXTENDED_IDS,
 } extended_id_t;
 
@@ -263,33 +263,22 @@ void recv_oled_keylogger_string_sync(const uint8_t *data, uint8_t size) {
 #endif // DISPLAY_DRIVER_ENABLE && DISPLAY_KEYLOGGER_ENABLE
 }
 
-void recv_rtc_config(const uint8_t *data, uint8_t size) {
-#ifdef COMMUNITY_MODULE_RTC_ENABLE
-    static rtc_time_t rtc_time;
-    if (memcmp(data, &rtc_time, sizeof(rtc_time_t)) != 0) {
-        memcpy(&rtc_time, data, sizeof(rtc_time_t));
-        rtc_set_time(rtc_time);
+void recv_i2c_scanner_data(const uint8_t *data, uint8_t size) {
+#ifdef COMMUNITY_MODULE_I2C_SCANNER_ENABLE
+    bool status = *((bool *)data);
+    if (status != i2c_scanner_get_enabled()) {
+        i2c_scanner_set_enabled(status);
     }
-#endif // COMMUNITY_MODULE_RTC_ENABLE
+#endif // COMMUNITY_MODULE_I2C_SCANNER_ENABLE
 }
 
-#if defined(WPM_ENABLE) && defined(COMMUNITY_MODULE_WPM_STATS_ENABLE)
-typedef struct wpm_stat_config_t {
-    uint16_t max_wpm;
-    uint32_t wpm_sum;
-    uint16_t wpm_count;
-} wpm_stat_config_t;
-#endif
-
-void recv_wpm_state_config(const uint8_t *data, uint8_t size) {
-#if defined(WPM_ENABLE) && defined(COMMUNITY_MODULE_WPM_STATS_ENABLE)
-#    include "wpm_stats.h"
-    static wpm_stat_config_t wpm_stat_config;
-    if (memcmp(data, &wpm_stat_config, sizeof(wpm_stat_config_t)) != 0) {
-        memcpy(&wpm_stat_config, data, sizeof(wpm_stat_config_t));
-        wpm_stats_set_split(&wpm_stat_config.max_wpm, &wpm_stat_config.wpm_sum, &wpm_stat_config.wpm_count);
+void recv_console_keylogger_data(const uint8_t *data, uint8_t size) {
+#ifdef COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
+    bool status = *((bool *)data);
+    if (status != console_keylogging_get_enabled()) {
+        console_keylogging_set_enabled(status);
     }
-#endif // WPM_ENABLE && COMMUNITY_MODULE_WPM_STATS_ENABLE
+#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
 }
 
 static const handler_fn_t handlers[NUM_EXTENDED_IDS] = {
@@ -302,8 +291,8 @@ static const handler_fn_t handlers[NUM_EXTENDED_IDS] = {
     [RPC_ID_EXTENDED_USERSPACE_RUNTIME_STATE] = recv_userspace_runtime_state,
     [RPC_ID_EXTENDED_SUSPEND_STATE]           = recv_device_suspend_state,
     [RPC_ID_EXTENDED_OLED_KEYLOGGER_STR]      = recv_oled_keylogger_string_sync,
-    [RPC_ID_EXTENDED_RTC_CONFIG]              = recv_rtc_config,
-    [RPC_ID_EXTENDED_WPM_STAT_CONFIG]         = recv_wpm_state_config,
+    [RPC_ID_EXTENDED_I2C_SCANNER]             = recv_i2c_scanner_data,
+    [RPC_ID_EXTENDED_CONSOLE_KEYLOGGER]       = recv_console_keylogger_data,
 };
 
 /**
@@ -631,57 +620,49 @@ void sync_debug_config(void) {
     }
 }
 
-#ifdef COMMUNITY_MODULE_RTC_ENABLE
-/**
- * @brief Synchronizes the RTC date and time between split keyboard halves.
- *
- * This function ensures that the RTC date and time are consistent across both halves of a split keyboard.
- */
-void sync_rtc_config(void) {
-    extern bool     rtc_needs_sync;
-    static uint32_t last_rtc_sync = 0;
+void sync_i2c_scanner_state(void) {
+#ifdef COMMUNITY_MODULE_I2C_SCANNER_ENABLE
+    bool            needs_sync    = false;
+    static uint16_t last_sync     = 0;
+    bool            current_state = i2c_scanner_get_enabled();
 
-    if (!rtc_is_connected()) {
-        return;
-    }
-
-    if (rtc_needs_sync || timer_elapsed32(last_rtc_sync) > 60 * 60 * 1000) { // 1 hour
-        last_rtc_sync       = timer_read32();
-        rtc_time_t rtc_time = rtc_read_time_struct();
-        if (send_extended_message_handler(RPC_ID_EXTENDED_RTC_CONFIG, &rtc_time, sizeof(rtc_time_t))) {
-            rtc_needs_sync = false;
-        }
-    }
-}
-#endif // COMMUNITY_MODULE_LAYER_MAP_ENABLE
-
-#if defined(WPM_ENABLE) && defined(COMMUNITY_MODULE_WPM_STATS_ENABLE)
-/**
- * @brief Synchronizes the WPM statistics configuration between split keyboard halves.
- *
- * This function ensures that the WPM statistics configuration is consistent across both halves of a split keyboard.
- */
-void sync_wpm_stats_config(void) {
-    static wpm_stat_config_t last_wpm_stat_config    = {0};
-    wpm_stat_config_t        current_wpm_stat_config = {0};
-    bool                     needs_sync              = false;
-
-    wpm_stats_get_split(&current_wpm_stat_config.max_wpm, &current_wpm_stat_config.wpm_sum,
-                        &current_wpm_stat_config.wpm_count);
-
-    if (memcmp(&current_wpm_stat_config, &last_wpm_stat_config, sizeof(wpm_stat_config_t)) != 0) {
+    if (current_state != i2c_scanner_get_enabled()) {
         needs_sync = true;
-        memcpy(&last_wpm_stat_config, &current_wpm_stat_config, sizeof(wpm_stat_config_t));
+    }
+
+    if (timer_elapsed(last_sync) > FORCED_SYNC_THROTTLE_MS) {
+        needs_sync = true;
     }
 
     if (needs_sync) {
-        if (send_extended_message_handler(RPC_ID_EXTENDED_WPM_STAT_CONFIG, &current_wpm_stat_config,
-                                          sizeof(wpm_stat_config_t))) {
-            // Successfully sent
+        if (send_extended_message_handler(RPC_ID_EXTENDED_I2C_SCANNER, &current_state, sizeof(bool))) {
+            last_sync = timer_read();
         }
     }
+#endif // COMMUNITY_MODULE_I2C_SCANNER_ENABLE
 }
-#endif
+
+void sync_console_keylogger_state(void) {
+#ifdef COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
+    bool            needs_sync    = false;
+    static uint16_t last_sync     = 0;
+    bool            current_state = console_keylogging_get_enabled();
+
+    if (current_state != console_keylogging_get_enabled()) {
+        needs_sync = true;
+    }
+
+    if (timer_elapsed(last_sync) > FORCED_SYNC_THROTTLE_MS) {
+        needs_sync = true;
+    }
+
+    if (needs_sync) {
+        if (send_extended_message_handler(RPC_ID_EXTENDED_CONSOLE_KEYLOGGER, &current_state, sizeof(bool))) {
+            last_sync = timer_read();
+        }
+    }
+#endif // COMMUNITY_MODULE_CONSOLE_KEYLOGGING_ENABLE
+}
 
 /**
  * @brief Initialize the transport sync
@@ -727,11 +708,7 @@ void housekeeping_task_transport_sync(void) {
         sync_debug_config();
         sync_userspace_runtime_state();
         sync_userspace_config();
-#ifdef COMMUNITY_MODULE_RTC_ENABLE
-        sync_rtc_config();
-#endif // COMMUNITY_MODULE_RTC_ENABLE
-#if defined(WPM_ENABLE) && defined(COMMUNITY_MODULE_WPM_STATS_ENABLE)
-        sync_wpm_stats_config();
-#endif // WPM_ENABLE && COMMUNITY_MODULE_WPM_STATS_ENABLE
+        sync_i2c_scanner_state();
+        sync_console_keylogger_state();
     }
 }

@@ -146,7 +146,7 @@ void painter_render_menu_block_game_of_life(painter_device_t device, painter_fon
 
 void painter_render_menu_block_layer_map(painter_device_t device, painter_font_handle_t font, uint16_t x, uint16_t y,
                                          uint16_t width, uint16_t height, bool force_redraw, dual_hsv_t *curr_hsv) {
-    painter_render_layer_map(device, font, x, y, width, force_redraw, curr_hsv);
+    painter_render_layer_map(device, font, x + 20, y + font->line_height + 4, width, force_redraw, curr_hsv);
 }
 
 void painter_render_menu_block_pd_accel_graph(painter_device_t device, painter_font_handle_t font, uint16_t x,
@@ -398,11 +398,11 @@ void painter_render_lock_state(painter_device_t device, painter_font_handle_t fo
 void painter_render_wpm(painter_device_t device, painter_font_handle_t font, uint16_t x, uint16_t y, bool force_redraw,
                         dual_hsv_t *curr_hsv) {
 #ifdef WPM_ENABLE
-    static wpm_sync_data_t last_wpm_update = {0};
-    static char            buf[4]          = {0};
-    uint16_t               temp_x = x + 4, temp_y = y + 4;
-    if (force_redraw || memcmp(&last_wpm_update, &userspace_runtime_state.wpm, sizeof(wpm_sync_data_t)) != 0) {
-        memcpy(&last_wpm_update, &userspace_runtime_state.wpm, sizeof(wpm_sync_data_t));
+    static uint8_t last_wpm_update = 0;
+    static char    buf[4]          = {0};
+    uint16_t       temp_x = x + 4, temp_y = y + 4;
+    if (force_redraw || last_wpm_update != get_current_wpm()) {
+        last_wpm_update = get_current_wpm();
         temp_x += qp_drawtext_recolor(device, temp_x, temp_y, font, "WPM: ", curr_hsv->primary.h, curr_hsv->primary.s,
                                       curr_hsv->primary.v, 0, 0, 0) +
                   5;
@@ -430,14 +430,29 @@ void painter_render_wpm_graph(painter_device_t device, painter_font_handle_t fon
 
     if (force_redraw || timer_elapsed(wpm_timer) > 1000) {
         wpm_timer = timer_read();
-        extern uint8_t     wpm_graph_samples[WPM_GRAPH_SAMPLES];
-        const graph_line_t lines[] = {
+        extern uint8_t     wpm_graph_samples[3][WPM_GRAPH_SAMPLES];
+        hsv_t              max_color = {.h = 0, .s = curr_hsv->secondary.s, .v = curr_hsv->secondary.v};
+        const graph_line_t lines[]   = {
             {
-                .data      = wpm_graph_samples,
+                .data      = wpm_graph_samples[0],
                 .color     = curr_hsv->secondary,
                 .mode      = LINE,
-                .max_value = 120,
+                .max_value = 140,
             },
+#    ifdef COMMUNITY_MODULE_WPM_STATS_ENABLE
+            {
+                .data      = wpm_graph_samples[1],
+                .color     = curr_hsv->primary,
+                .mode      = LINE,
+                .max_value = 140,
+            },
+            {
+                .data      = wpm_graph_samples[2],
+                .color     = max_color,
+                .mode      = LINE,
+                .max_value = 140,
+            },
+#    endif
             GRAPHS_END,
         };
 
@@ -1102,10 +1117,10 @@ void painter_render_layer_map(painter_device_t device, painter_font_handle_t fon
                               uint16_t width, bool force_redraw, dual_hsv_t *curr_hsv) {
 #ifdef COMMUNITY_MODULE_LAYER_MAP_ENABLE
     if (force_redraw || get_layer_map_has_updated()) {
-        y += font->line_height + 4;
+        // y += font->line_height + 4;
         uint16_t xpos = x, ypos = y;
         for (uint8_t lm_y = 0; lm_y < LAYER_MAP_ROWS; lm_y++) {
-            xpos = x + 20;
+            xpos = x;
             for (uint8_t lm_x = 0; lm_x < LAYER_MAP_COLS; lm_x++) {
                 uint16_t keycode = extract_non_basic_keycode(layer_map[lm_y][lm_x], NULL, false);
 #    ifdef LAYER_MAP_REMAPPING
@@ -1114,7 +1129,7 @@ void painter_render_layer_map(painter_device_t device, painter_font_handle_t fon
                 keypos_t key = {.row = lm_y, .col = lm_x};
 #    endif // LAYER_MAP_REMAPPING
 
-                xpos += MAX(qp_drawtext_recolor(device, xpos, ypos, font_oled, get_keyode_character(keycode, &key),
+                xpos += MAX(qp_drawtext_recolor(device, xpos, ypos, font, get_keyode_character(keycode, &key),
                                                 curr_hsv->primary.h, curr_hsv->primary.s,
                                                 peek_matrix_layer_map(lm_y, lm_x) ? 0 : curr_hsv->primary.v,
                                                 curr_hsv->secondary.h, curr_hsv->secondary.s,
